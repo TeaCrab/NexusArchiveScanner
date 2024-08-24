@@ -1,8 +1,15 @@
-import os, re, sys, code, shutil, subprocess, webbrowser
-import blessed, patoolib
+import os, re, code, shutil, subprocess, webbrowser
+from patoolib import (check_archive_format,
+                      check_program_compression,
+                    #   extract_archive,
+                      find_archive_program,
+                      get_archive_cmdlist_func,
+                      get_archive_format,
+                      )
+from patoolib.util import run_under_pythonw
 import json
 from random import randint
-from io import StringIO
+# from io import StringIO
 from blessed import Terminal
 from blessed.sequences import Sequence
 # Python Script used to 'manage' downloaded archives from Nexus Mods
@@ -15,31 +22,36 @@ ACPROG = {}
 ACMDLS = {}
 Archive_Content = {}
 
+if os.path.exists('_Archive_Content.json'):
+    with open('_Archive_Content.json', 'r') as fp:
+        Archive_Content = json.load(fp)
+        fp.close()
+
 def build_content():
     global Archive_Content
-    Archive_Content = {get_path(mod):LsArc(get_path(mod)) for mod in MODS.values()}
+    Archive_Content = {get_path(mod):lsarc(get_path(mod)) for mod in MODS.values()}
     json.dump(Archive_Content, open('Archive_Content.json', 'w'))
 
-def CapCmd(apath):
+def capcmd(apath):
     if os.path.exists(apath) and os.access(apath, os.R_OK):
-        aform, acomp = patoolib.get_archive_format(apath)
+        aform, acomp = get_archive_format(apath)
         if aform in ACPROG.keys() and acomp in ACPROG[aform].keys():
             aprog = ACPROG[aform][acomp]
         else:
-            patoolib.check_archive_format(aform, acomp)
-            aprog = patoolib.find_archive_program(aform, 'list', None, None)
-            patoolib.check_program_compression(apath, 'list', aprog, acomp)
+            check_archive_format(aform, acomp)
+            aprog = find_archive_program(aform, 'list', None, None)
+            check_program_compression(apath, 'list', aprog, acomp)
             if aform not in ACPROG.keys(): ACPROG[aform] = {}
             if acomp not in ACPROG[aform].keys(): ACPROG[aform][acomp] = aprog
         if aprog in ACMDLS.keys() and aform in ACMDLS[aprog].keys():
             acmdlist = ACMDLS[aprog][aprog] + [apath]
         else:
-            get_archive_cmdlist = patoolib.get_archive_cmdlist_func(aprog, 'list', aform)
+            get_archive_cmdlist = get_archive_cmdlist_func(aprog, 'list', aform)
             acmdlist = get_archive_cmdlist(apath, acomp, aprog, 1, False, None)
             if aform not in ACMDLS.keys(): ACMDLS[aform] = {}
             if aprog not in ACMDLS[aform].keys(): ACMDLS[aform][aprog] = acmdlist[:-1]
         cmd, runargs = acmdlist if isinstance(acmdlist, tuple) else acmdlist, {}
-        if patoolib.util.run_under_pythonw():
+        if run_under_pythonw():
             runargs['creationflags'] = subprocess.CREATE_NO_WINDOW
         runargs['input']=""
         if runargs.get("shell"):
@@ -48,12 +60,12 @@ def CapCmd(apath):
     else:
         print("Archive File Not Found")
 
-def LsArc(apath):
-    # string = CapCmd(apath).stdout
-    # string = RE_STDLN.sub(r'\n', CapCmd(apath).stdout.decode())
+def lsarc(apath):
+    # string = capcmd(apath).stdout
+    # string = RE_STDLN.sub(r'\n', capcmd(apath).stdout.decode())
     # code.interact(local=locals())
-    try: return RE_STDOUT.findall(RE_STDPTH.sub('/', RE_STDLN.sub(r'\n', CapCmd(apath).stdout.decode())))
-    except UnicodeDecodeError: return RE_STDOUT.findall(RE_STDPTH.sub('/', RE_STDLN.sub(r'\n', CapCmd(apath).stdout.decode(encoding='latin-1'))))
+    try: return RE_STDOUT.findall(RE_STDPTH.sub('/', RE_STDLN.sub(r'\n', capcmd(apath).stdout.decode())))
+    except UnicodeDecodeError: return RE_STDOUT.findall(RE_STDPTH.sub('/', RE_STDLN.sub(r'\n', capcmd(apath).stdout.decode(encoding='latin-1'))))
     else: print(apath); input("Press any key to continue...")
 
 _DIRLEN = 36
@@ -82,8 +94,6 @@ get_path = lambda mod: list(mod[VER].values())[0]
 
 REGP = lambda string: rf"(?:{string})"
 REOR = lambda *terms: f"{'|'.join([REGP(e) for e in terms])}"
-
-CYBERPUNK = "F:/SteamLibrary/steamapps/common/Cyberpunk 2077/"
 
 RE_DIR = re.compile(r'^__[a-z].*', re.I)
 RE_MID = re.compile(r'(?<=\n)(?P<PTH>(?P<DIR>\w+)/(?P<NAM>.*?)-(?P<MID>\d\d\d+)-(?P<VER>\w+(?:-\w+)*)-(?P<HSH>\d+)\.(?P<EXT>\w+))', re.I)
@@ -128,12 +138,16 @@ def scan():
         else:
             MODS[e[NAM]][VER].update({e[VER]: e[PTH]})
 
-def ppaths(show_all=False):
+def ppaths(show_all=False, sortkey=None):
     clear()
     global MODS
+    mids = {}
     mods = []
-    for key, value in sorted(MODS.items(), key=lambda e: e[0]):
-        if len(value[VER])>1 or show_all:
+    for key, value in MODS.items():
+        if value[MID] in mids.keys(): mids[value[MID]] += [key]
+        else: mids[value[MID]] = [key]
+    for key, value in sorted(MODS.items(), key=lambda e: e[0] if not sortkey else e[1][sortkey]):
+        if len(value[VER])>1 or (value[MID] in mids.keys() and (len(mids[value[MID]])>1 or key not in mids[value[MID]])) or show_all:
             mods += [MODS[key]]
             print(f"{value[MID]:>{_MIDLEN-1}}:{ckey(key):{_NAMLEN+16}}{newline_join([f"{cver(k, i)}{v}" for i, (k, v) in enumerate(versort(value))])}")
     print(f"{len(MODS)} mods found")
@@ -155,9 +169,6 @@ def filter(key, term):
     global DB
     RE = re.compile(term, re.I)
     return sorted([e for e in DB if RE.search(e[key])], key=lambda e: [e[NAM], e[VER]])
-
-def move(mod, name):
-    shutil.move()
 
 def getmods(input_value):
     global MODS
@@ -183,37 +194,40 @@ def clean(input_value):
         for i, kv in enumerate(versort(m)):
             if i>0: shutil.move(kv[1], f"___CLEAN/{os.path.basename(kv[1])}")
 
-def delete(input_value):
-    mods = getmods(input_value)
-    if not mods: print(f"Input mods not found."); return
-    confirmation = input("Enter 'DELETE' to proceed with deleting specified mods:")
-    if confirmation!='DELETE': print("Deletion Cancelled"); return
-    if not os.path.exists('___DELETE/'): os.mkdir('___DELETE/')
-    for m in mods:
-        for fpth in m[VER].values():
-            shutil.move(fpth, f"___DELETE/{os.path.basename(fpth)}")
+# def move(mod, name):
+#     shutil.move()
 
-def check_struc(path=None):
-    path = path if path else '.temp/'
-    file_list = []
-    for root, _, files in os.walk(path):
-        file_list += {f"{root}/{f}" for f in files}
-    return file_list
+# def delete(input_value):
+#     mods = getmods(input_value)
+#     if not mods: print(f"Input mods not found."); return
+#     confirmation = input("Enter 'DELETE' to proceed with deleting specified mods:")
+#     if confirmation!='DELETE': print("Deletion Cancelled"); return
+#     if not os.path.exists('___DELETE/'): os.mkdir('___DELETE/')
+#     for m in mods:
+#         for fpth in m[VER].values():
+#             shutil.move(fpth, f"___DELETE/{os.path.basename(fpth)}")
 
-def apply_struc(path=None):
-    file_list = check_struc(path)
-    for fpth in file_list:
-        shutil.move(fpth, )
+# def check_struc(path=None):
+#     path = path if path else '.temp/'
+#     file_list = []
+#     for root, _, files in os.walk(path):
+#         file_list += {f"{root}/{f}" for f in files}
+#     return file_list
 
-def extract(input_value):
-    mods = getmods(input_value)
-    if not mods: print(f"Input mods not found."); return
-    if not os.path.exists('_STAGING/'): os.mkdir('_STAGING/')
-    if not os.path.exists('.temp/'): os.mkdir('.temp/')
-    # shutil.rmtree('.temp/*')
-    for m in mods:
-        for _, fpth in versort(m)[0]:
-            patoolib.extract_archive(fpth, outdir=f".temp/")
+# def apply_struc(path=None):
+#     file_list = check_struc(path)
+#     for fpth in file_list:
+#         shutil.move(fpth, )
+
+# def extract(input_value):
+#     mods = getmods(input_value)
+#     if not mods: print(f"Input mods not found."); return
+#     if not os.path.exists('_STAGING/'): os.mkdir('_STAGING/')
+#     if not os.path.exists('.temp/'): os.mkdir('.temp/')
+#     # shutil.rmtree('.temp/*')
+#     for m in mods:
+#         for _, fpth in versort(m)[0]:
+#             extract_archive(fpth, outdir=f".temp/")
 
 def link(n):
     webbrowser.open(f"https://www.nexusmods.com/cyberpunk2077/mods/{n}")
