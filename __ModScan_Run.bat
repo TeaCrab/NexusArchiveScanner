@@ -3,6 +3,6 @@ for /f "tokens=2 delims==" %%a in ('wmic OS Get localdatetime /value') do set "d
 set "DATE=%dt:~0,4%%dt:~4,2%%dt:~6,2%"
 set "TIME=%dt:~8,2%%dt:~10,2%%dt:~12,2%"
 
-python __ModScan.py
+python _ModScan.py
 
 pause
