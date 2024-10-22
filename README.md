@@ -1,3 +1,5 @@
+![](https://github.com/TeaCrab/NexusArchiveScanner/blob/master/__title.png?raw=true)
+
 # Instructions:
 Working Directory Structure must be:
 ```
@@ -20,42 +22,55 @@ Go in `_ModScan.py` and change the Regex Rule of `RE_DIR` to target your directo
 
 # Script Functions (Python Interactive Console)
 
-`ppaths()`
-* lists all mods that has a potential version conflict, this show up in different colors
-* lists all files that falls under the same mod ID but has different file names
-* use `ppaths(sortkey=MID)` to sort the mods based on Mod ID instead of the mod names
-* very useful in finding mods where the file name has changed between versions
-* useful global var for sorting: PTH, DIR, NAM, MID, EXT (or VER, HSH but I don't see the reason to sort with version or hash among many different mods)
-
-`paths()`
-* returns the list of mods where the name is the same but has multiple different versions
-
-`clean(paths())`
-* automatically put all old versions of any mods with the same filename into `\__CLEAN`
-
-`getmods(input_value)`
-* returns list of mod(s) based on `input_value` - which can be `9999` (integer Mod ID), `"keyword"` (string, mod name, etc), or `["veh", "type-66", "bike"]` (list of strings)
-
 `build_content()`
-* if you have 7-ZIP installed, this function scans what files are inside each `zip/7z/rar` containers and generates a JSON file to list them all
-* eventually this can be used to pre-determine file-level mod conflict before installing any mods
-* takes a while to execute, single threaded, not very useful at the moment but if you need a complete list of contents of all mods, you can have it
+* works only when you have 7-ZIP installed, scans the content of every `zip/7z/rar` file and generates a JSON file to list all content
+* groundwork for detecting/automating file level mod conflict checking & a tool for trouble shooting
+* takes a while to generate the JSON file if you have a lot of mods
 
 `lsarc(filepath)`
 * this will list all files inside of a single `zip/7z/rar` container given the path of it
 
-`scan()`
-* this rescans the directory for any changes
-
-`modds(DB)`
-* `DB` is a global variable used to store information of all mods during scan
-* this function can be used to list all mods by `folder | Mod ID | version | filename | hash`
-* a side product during early debugging
-
-`modds(filter(key, term))`
-* using the same `sortkey=MID` for `key` in filter will let user list mods by `term`
-* example usage: `modds(filter(NAM, 'fire'))` finds all mods with the word `fire` in their file name
-* a side product during early debugging
-
 `link(ModID)`
 * open browser to the mod page on nexus based on the ModID
+* currently defaults to Cyberpunk 2077
+
+`scan()`
+* this scans the directory, useful for refreshing
+
+`paths(filt=None, sortbyname=False)`
+* returns the list of mods where the name is the same but has multiple different versions
+* if `filt` is a valid string, it only displays mod files which contains the key words in sequence
+
+`ppaths(filt=None, sortbyname=False)`
+* same as paths, but:
+* lists all mods that has a potential version conflict, this show up in different colors
+* lists all files that falls under the same mod ID but has different file names
+* very useful in finding mods where the file name has changed between versions
+
+`upaths(filt="__unsorted", sortbyname=False)`
+* just a shortcut for listing from a folder which the name contains `__unsorted` keyword
+
+`getmods(input_value)`
+* returns list of mod info based on `input_value` - which can be:
+  * `9999` (a single integer as Mod ID)
+  * `"key words"` (same usage as the `filt` argument in `paths()`)
+  * `[999, 1999, 2999]` (list of integer Mod IDs)
+  * `{999:{content info}, 1000:...}` (dict containing integer Mod ID as key and Mod info as value)
+  * `[{999:{content info}, {1000:...}]` (same as above but a list of)
+
+`fsort(fuzzypath='')`
+* `fuzzypath` selects a single folder name in working directory and attempts to load a corresponding text file
+* the text file contains a Mod ID on each line, all the files associated with the IDs will be moved into the `fuzzypath` folder
+* lists any mods in the text file which no files are found in the working directory
+
+`clean(input_value, force=False)`
+* `input_value` is the same idea as in `getmods()`
+* put all older versions of selected mods' files with the same name into `\__CLEAN` directory
+* if `force==True`, all files associated with the selected mods will be put into `\__CLEAN`
+
+`move(input_value, fuzzypath)`
+* `input_value` is the same idea as in `getmods()`
+* put all files of any selected mods into the `fuzzyfind` directory
+
+`mvvh(input_value)`
+* just a shortcut for moving selected mods into `\__Vehicles` folder

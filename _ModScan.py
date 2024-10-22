@@ -1,22 +1,22 @@
-import os, re, code, shutil, subprocess, webbrowser
+# Python Script used to 'manage' downloaded archives from Nexus Mods
+
+import os, re, code, json, shutil, subprocess, webbrowser
 from patoolib import (check_archive_format,
                       check_program_compression,
-                    #   extract_archive,
                       find_archive_program,
                       get_archive_cmdlist_func,
                       get_archive_format,
                       )
 from patoolib.util import run_under_pythonw
-import json
 from random import randint
-# from io import StringIO
 from blessed import Terminal
 from blessed.sequences import Sequence
-# Python Script used to 'manage' downloaded archives from Nexus Mods
 
 RE_STDOUT = re.compile(r"(?:(?:\.{4}A)|(?:\.{5}))(?:\s*\d+){2}\s+([-+`~!@#$%^&_+/,.;'\w\\ \(\)\[\]\{\}]+)", re.I)
 RE_STDLN = re.compile(r'[\r\n]+', re.I)
 RE_STDPTH = re.compile(r'\\', re.I)
+
+RE_SEARCH = lambda string: re.compile(re.sub(r"\s+", '.*?', string, re.I), re.I)
 
 ACPROG = {}
 ACMDLS = {}
@@ -29,7 +29,10 @@ if os.path.exists('_Archive_Content.json'):
 
 def build_content():
     global Archive_Content
-    Archive_Content = {get_path(mod):lsarc(get_path(mod)) for mod in MODS.values()}
+    for mid, content in MODS.items():
+        for name, package in content.items():
+            for ver, path in package.items():
+                Archive_Content[path] = lsarc(path)
     json.dump(Archive_Content, open('Archive_Content.json', 'w'))
 
 def capcmd(apath):
@@ -68,6 +71,9 @@ def lsarc(apath):
     except UnicodeDecodeError: return RE_STDOUT.findall(RE_STDPTH.sub('/', RE_STDLN.sub(r'\n', capcmd(apath).stdout.decode(encoding='latin-1'))))
     else: print(apath); input("Press any key to continue...")
 
+def link(n):
+    webbrowser.open(f"https://www.nexusmods.com/cyberpunk2077/mods/{n}")
+
 _DIRLEN = 36
 _MIDLEN = 8
 _VERLEN = 16
@@ -89,9 +95,6 @@ VER = 'VER'
 HSH = 'HSH'
 EXT = 'EXT'
 
-random_mod = lambda: list(list(MODS.values())[randint(0, len(MODS)-1)][VER].values())[0]
-get_path = lambda mod: list(mod[VER].values())[0]
-
 REGP = lambda string: rf"(?:{string})"
 REOR = lambda *terms: f"{'|'.join([REGP(e) for e in terms])}"
 
@@ -110,7 +113,7 @@ clear = lambda: os.system('cls')
 print_mod = lambda e: print(f"{e[DIR]:<{_DIRLEN}}: {e[MID]:<{_MIDLEN}}{e[VER]:<{_VERLEN}}: {e[NAM]:{_NAMLEN}} {e[HSH]}")
 
 newline_join = lambda array: '\n'.join([f"{e}" for e in array])
-versort = lambda mod: sorted(mod[VER].items(), key=lambda e: e[0], reverse=True)
+versort = lambda package: sorted(package.items(), key=lambda e: e[0], reverse=True)
 
 lnam = lambda string: string if len(string) < _NAMLEN-1 else f"{string[:_NAMLEN-5]}..."
 lver = lambda string: string if len(string) < _VERLEN-1 else f"{string[:_VERLEN-5]}..."
@@ -127,112 +130,137 @@ def scan():
     DIRS = [e for e in os.listdir() if RE_DIR.match(e.lower()) and not '.' in e]
     PATHS = [f"{f}/{e}" for f in DIRS for e in os.listdir(f)]
     DB = [e.groupdict() for e in RE_MID.finditer('\n'+'\n'.join(PATHS))]
-    MODS = {e[NAM]:{} for e in DB}
+    MODS = {int(e[MID]):{} for e in DB}
     for e in DB:
-        if MID not in MODS[e[NAM]].keys():
-            MODS[e[NAM]][MID] = e[MID]
-        elif e[MID] != MODS[e[NAM]][MID]:
-            print(f"Inconsistent Mod ID - {e[NAM]}: {MODS[e[NAM]][MID]} / {e[MID]}")
-        if VER not in MODS[e[NAM]].keys():
-            MODS[e[NAM]][VER] = {e[VER]: e[PTH]}
+        name, mid, ver, pth = e[NAM], int(e[MID]), e[VER], e[PTH]
+        if name not in MODS[mid].keys():
+            MODS[mid][name] = {}
+            MODS[mid][name][ver] = pth
         else:
-            MODS[e[NAM]][VER].update({e[VER]: e[PTH]})
+            MODS[mid][name].update({ver:pth})
+        #     print(f"Inconsistent Mod ID - {e[NAM]}: {MODS[e[NAM]][MID]} / {e[MID]}")
+        # if VER not in MODS[e[NAM]].keys():
+        #     MODS[e[NAM]][VER] = {e[VER]: e[PTH]}
+        # else:
+        #     MODS[e[NAM]][VER].update({e[VER]: e[PTH]})
 
-def ppaths(show_all=False, sortkey=None):
-    clear()
-    global MODS
-    mids = {}
-    mods = []
-    for key, value in MODS.items():
-        if value[MID] in mids.keys(): mids[value[MID]] += [key]
-        else: mids[value[MID]] = [key]
-    for key, value in sorted(MODS.items(), key=lambda e: e[0] if not sortkey else e[1][sortkey]):
-        if len(value[VER])>1 or (value[MID] in mids.keys() and (len(mids[value[MID]])>1 or key not in mids[value[MID]])) or show_all:
-            mods += [MODS[key]]
-            print(f"{value[MID]:>{_MIDLEN-1}}:{ckey(key):{_NAMLEN+16}}{newline_join([f"{cver(k, i)}{v}" for i, (k, v) in enumerate(versort(value))])}")
-    print(f"{len(MODS)} mods found")
+TABS = lambda n: '\n' + '\t'*n
 
-def paths(get_all=False):
+def dict_concat(d, mode=1, depth=0):
+    match d:
+        case list()|tuple()|set():
+            return TABS(depth).join((dict_concat(e, mode, depth) for e in d))
+        case dict():
+            if any(isinstance(e, dict) for e in d.values()):
+                if not depth:
+                    return TABS(depth).join(f"{k}\t{dict_concat(v, mode, depth+1)}" for k, v in d.items())
+                else:
+                    return TABS(depth).join(f"{dict_concat(v, mode, depth+1)}" for v in d.values())
+            else:
+                match mode:
+                    case 0: return TABS(depth).join(f"{e}" for e in d.keys())
+                    case 1: return TABS(depth).join(f"{e}" for e in d.values())
+                    case _: return TABS(depth).join(f"{k}:{v}" for k, v in d.items())
+        case _: print(f"{d=:<80}, {mode=}")
+
+def paths(filt=None, sortbyname=False):
+    scan()
     global MODS
-    mods = []
-    for key, value in MODS.items() or get_all:
-        if len(value[VER])>1: mods += [MODS[key]]
+    mods = {}
+    for mid, content in sorted(MODS.items(), key=lambda e: e[0] if not sortbyname else list(e[1].keys())[0]):
+        if (not filt and len(content.keys())>1) or (filt and RE_SEARCH(filt).search(dict_concat(content), re.I)):
+            mods[mid] = MODS[mid]
     return mods
 
-def modds(db):
+def ppaths(filt=None, sortbyname=False):
     clear()
-    for e in sorted(db, key=lambda e: [e[NAM], e[VER]]):
-        print_mod(e)
-    print(f"{len(db)} mods found")
+    global MODS
+    for mid, content in paths(filt, sortbyname).items():
+        for key in content.keys():
+            print(f"{mid:>{_MIDLEN-1}}:{ckey(key):{_NAMLEN+16}}{newline_join([f"{cver(k, i)}{v}" for i, (k, v) in enumerate(versort(content[key]))])}")
+    print(f"{len(MODS)} mods found")
 
-def filter(key, term):
-    global DB
-    RE = re.compile(term, re.I)
-    return sorted([e for e in DB if RE.search(e[key])], key=lambda e: [e[NAM], e[VER]])
+upaths = lambda: ppaths('__unsorted')
 
 def getmods(input_value):
     global MODS
     match input_value:
         case int():
-            return [MODS[key] for key in MODS.keys() if int(MODS[key][MID])==input_value]
+            return [MODS[input_value]]
         case str():
-            RE = re.compile(input_value, re.I)
-            return [MODS[key] for key in MODS.keys() if RE.search(key)]
+            return [MODS[mid] for mid, content in MODS.items() if RE_SEARCH(input_value).search('\n'.join(content.keys()))]
+        case dict():
+            if all([isinstance(e, int) for e in input_value.keys()]):
+                return list(input_value.values())
         case list():
-            if all([isinstance(e, dict) for e in input_value]):
-                return [e for e in input_value if MID in e.keys()]
+            if all([isinstance(e, dict) for e in input_value]) and all([isinstance(e, int) for e in input_value.keys()]):
+                return input_value
+            elif all([isinstance(e, int) for e in input_value]):
+                return [MODS[e] for e in input_value if e in MODS.keys()]
             else:
                 print(f"Unhandled Input Value: {input_value}"); return []
         case _:
             print(f"Unhandled Input Value: {input_value}"); return []
 
-def clean(input_value):
+def resolve_fuzzypath(fuzzypath):
+    if len(result:=[e for e in os.listdir() if RE_SEARCH(fuzzypath).search(e) and os.path.isdir(e)])==1:
+        return result[0]
+    else:
+        print("Ambiguous path resolution or path does not exist.")
+        return None
+
+def fcheck(fuzzypath):
+    path = resolve_fuzzypath(fuzzypath)
+    if path:
+        with open(f"{path}.txt", 'r') as fp:
+            modlist = [int(e) for e in fp.read().split('\n')]
+            mods = getmods(modlist)
+        fp.close()
+        modlist = [e for e in modlist if e not in MODS.keys()]
+        return modlist
+    else:
+        print(f"Move instruction cancelled")
+
+def fsort(fuzzypath):
+    path = resolve_fuzzypath(fuzzypath)
+    if path:
+        with open(f"{path}.txt", 'r') as fp:
+            modlist = [int(e) for e in fp.read().split('\n')]
+            mods = getmods(modlist)
+            if not mods: print(f"Input mods not found."); return
+            for m in mods:
+                for name, package in m.items():
+                    for i, verpath in enumerate(versort(package)):
+                        shutil.move(verpath[1], f"{path}/{os.path.basename(verpath[1])}")
+        fp.close()
+        print(f"These mods are currently not found in local repository{fcheck(fuzzypath)}")
+    else:
+        print(f"Move instruction cancelled")
+
+def clean(input_value, force=False):
     mods = getmods(input_value)
     if not mods: print(f"Input mods not found."); return
     if not os.path.exists('___CLEAN/'): os.mkdir('___CLEAN/')
     for m in mods:
-        for i, kv in enumerate(versort(m)):
-            if i>0: shutil.move(kv[1], f"___CLEAN/{os.path.basename(kv[1])}")
+        for name, package in m.items():
+            for i, verpath in enumerate(versort(package)):
+                if i>0 or force: shutil.move(verpath[1], f"___CLEAN/{os.path.basename(verpath[1])}")
 
-# def move(mod, name):
-#     shutil.move()
+def move(input_value, fuzzypath):
+    mods = getmods(input_value)
+    if not mods: print(f"Input mods not found."); return
+    path = resolve_fuzzypath(fuzzypath)
+    if path:
+        for m in mods:
+            for name, package in m.items():
+                for i, verpath in enumerate(versort(package)):
+                    shutil.move(verpath[1], f"{path}/{os.path.basename(verpath[1])}")
+    else:
+        print(f"Move instruction cancelled")
 
-# def delete(input_value):
-#     mods = getmods(input_value)
-#     if not mods: print(f"Input mods not found."); return
-#     confirmation = input("Enter 'DELETE' to proceed with deleting specified mods:")
-#     if confirmation!='DELETE': print("Deletion Cancelled"); return
-#     if not os.path.exists('___DELETE/'): os.mkdir('___DELETE/')
-#     for m in mods:
-#         for fpth in m[VER].values():
-#             shutil.move(fpth, f"___DELETE/{os.path.basename(fpth)}")
-
-# def check_struc(path=None):
-#     path = path if path else '.temp/'
-#     file_list = []
-#     for root, _, files in os.walk(path):
-#         file_list += {f"{root}/{f}" for f in files}
-#     return file_list
-
-# def apply_struc(path=None):
-#     file_list = check_struc(path)
-#     for fpth in file_list:
-#         shutil.move(fpth, )
-
-# def extract(input_value):
-#     mods = getmods(input_value)
-#     if not mods: print(f"Input mods not found."); return
-#     if not os.path.exists('_STAGING/'): os.mkdir('_STAGING/')
-#     if not os.path.exists('.temp/'): os.mkdir('.temp/')
-#     # shutil.rmtree('.temp/*')
-#     for m in mods:
-#         for _, fpth in versort(m)[0]:
-#             extract_archive(fpth, outdir=f".temp/")
-
-def link(n):
-    webbrowser.open(f"https://www.nexusmods.com/cyberpunk2077/mods/{n}")
+mvvh = lambda input_value: move(input_value, "__Vehicles")
 
 while True:
-    scan()
+    upaths()
     code.interact(local=locals())
 
