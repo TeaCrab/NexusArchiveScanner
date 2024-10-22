@@ -60,7 +60,7 @@ Go in `_ModScan.py` and change the Regex Rule of `RE_DIR` to target your directo
 `fsort(fuzzypath='')`
 * `fuzzypath` selects a single folder name in working directory and attempts to load a corresponding text file
 * the text file contains a Mod ID on each line, all the files associated with the IDs will be moved into the `fuzzypath` folder
-* lists any mods in the text file which no files are found in the working directory
+* lists any mods in the text file which doesn't exists in the working directory
 
 `clean(input_value, force=False)`
 * `input_value` is the same idea as in `getmods()`
