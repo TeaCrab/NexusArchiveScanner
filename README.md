@@ -1,5 +1,4 @@
 ![](https://github.com/TeaCrab/NexusArchiveScanner/blob/master/__title.png?raw=true)
-
 # Instructions:
 Working Directory Structure must be:
 ```
