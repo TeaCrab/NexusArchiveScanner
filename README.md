@@ -19,6 +19,12 @@ Go in `_ModScan.py` and change the Regex Rule of `RE_DIR` to target your directo
 
 `_ModScan_Run` to start the python script.
 
+## Update 2024-11-17:
+### Version strings & symbols in file names are now stripped from mod file identification.
+* File names which only differ in symbol, version string & upper/lower case now identifies as the same file under their Mod ID & versions.
+* If the mod name, ID and version are all identical but exists in different folders, the file which has the largest hash will be kept during cleaning.
+  * If the hash are also the same, the alphabetical first file that's already categorized will be kept
+
 # Script Functions (Python Interactive Console)
 
 `build_content()`
