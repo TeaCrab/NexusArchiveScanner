@@ -95,11 +95,16 @@ VER = 'VER'
 HSH = 'HSH'
 EXT = 'EXT'
 
+UNSORT = '__unsorted'
+
 REGP = lambda string: rf"(?:{string})"
 REOR = lambda *terms: f"{'|'.join([REGP(e) for e in terms])}"
 
-RE_DIR = re.compile(r'^__[a-z].*', re.I)
+RE_DIR = re.compile(r'^__[a-zA-Z]+.*', re.I)
 RE_MID = re.compile(r'(?<=\n)(?P<PTH>(?P<DIR>\w+)/(?P<NAM>.*?)-(?P<MID>\d\d\d+)-(?P<VER>\w+(?:-\w+)*)-(?P<HSH>\d+)\.(?P<EXT>\w+))', re.I)
+RE_NAM = re.compile(r'[-_ ]+', re.I)
+RE_VER = re.compile(r'(?:(?:\sv?\d+)(?:[\._-abc]\d+)+x?(?:zip|rar)?|(?:\sv\d+)|(?:(?:re)?v\d+(?=[ :$])))(?:[\._-abc])?\d*(?:zip|rar)?', re.I)
+namfy = lambda name: RE_VER.sub(' VER', RE_NAM.sub(' ', name.lower()))
 
 RES = {
     re.compile(r".*/(archive/pc/mod/.*)", re.I),
@@ -120,7 +125,7 @@ lver = lambda string: string if len(string) < _VERLEN-1 else f"{string[:_VERLEN-
 ckey = lambda string: TERM.green_on_black(lnam(string) + ':')
 cver = lambda string, i: TERM.green_on_black(f"{lver(string.lstrip())+': ':{_VERLEN}}") if i==0 else TERM.yellow_on_black(f"{' '*(_NAMLEN+8)}{lver(string)+': ':{_VERLEN}}")
 
-def scan():
+def scan(debug=False):
     global DB, DIRS, MODS, PATHS
     clear()
     DB = []
@@ -128,16 +133,38 @@ def scan():
     PATHS = []
     MODS = {}
     DIRS = [e for e in os.listdir() if RE_DIR.match(e.lower()) and not '.' in e]
+    if debug: print('\n'.join([e for e in DIRS]))
     PATHS = [f"{f}/{e}" for f in DIRS for e in os.listdir(f)]
     DB = [e.groupdict() for e in RE_MID.finditer('\n'+'\n'.join(PATHS))]
-    MODS = {int(e[MID]):{} for e in DB}
+    MODS = {int(e[MID]):{HSH:{}} for e in DB}
     for e in DB:
-        name, mid, ver, pth = e[NAM], int(e[MID]), e[VER], e[PTH]
+        name, mid, ver, hsh, pth = namfy(e[NAM]), int(e[MID]), e[VER], int(e[HSH]), e[PTH]
+        if hsh not in MODS[mid][HSH].keys():
+            MODS[mid][HSH].update({hsh:{NAM:name, VER:ver}})
+        else:
+            if name != MODS[mid][HSH][hsh][NAM] or ver != MODS[mid][HSH][hsh][VER]:
+                print(f"Inconsistent name/ver/hash - {e[MID]}:{hsh}: {'-'.join(MODS[MID][HSH][hsh].values())} and {name}-{ver}")
+                if debug: code.interact(local=locals())
         if name not in MODS[mid].keys():
             MODS[mid][name] = {}
             MODS[mid][name][ver] = pth
+        elif ver in MODS[mid][name].keys():
+            hshs = [k for k, v in MODS[mid][HSH].items() if name==v[NAM] and k != hsh]
+            last = max(hshs + [0,])
+            if hsh > last:
+                MODS[mid][name][f".{len(hshs)+1}"] = MODS[mid][name][ver]
+                MODS[mid][name][ver] = pth
+            elif hsh == last:
+                if UNSORT in MODS[mid][name][ver]:
+                    MODS[mid][name][f".{len(hshs)+1}"] = MODS[mid][name][ver]
+                    MODS[mid][name][ver] = pth
+                else:
+                    MODS[mid][name][f".{len(hshs)+1}"] = pth
+            elif last != 0:
+                MODS[mid][name][f".{len(hshs)+1}"] = pth
         else:
             MODS[mid][name].update({ver:pth})
+
         #     print(f"Inconsistent Mod ID - {e[NAM]}: {MODS[e[NAM]][MID]} / {e[MID]}")
         # if VER not in MODS[e[NAM]].keys():
         #     MODS[e[NAM]][VER] = {e[VER]: e[PTH]}
@@ -163,24 +190,48 @@ def dict_concat(d, mode=1, depth=0):
                     case _: return TABS(depth).join(f"{k}:{v}" for k, v in d.items())
         case _: print(f"{d=:<80}, {mode=}")
 
-def paths(filt=None, sortbyname=False):
+LFS = []
+LFT = ''
+LML = []
+
+def lml(n=0):
+    listed = list(LML.keys())
+    if n > 0:
+        return listed[:n]
+    elif n < 0:
+        return listed[n:]
+    else:
+        return listed
+
+def setlast(filt, mods):
+    global LFS, LFT, LML
+    if filt:
+        LFT = filt
+        if filt in LFS: LFS.remove(LFT)
+        LFS.append(LFT)
+        LML = mods
+
+def paths(filt='', sortbyname=False):
     scan()
     global MODS
     mods = {}
     for mid, content in sorted(MODS.items(), key=lambda e: e[0] if not sortbyname else list(e[1].keys())[0]):
-        if (not filt and len(content.keys())>1) or (filt and RE_SEARCH(filt).search(dict_concat(content), re.I)):
+        if (not filt and len(content.keys())>0) or (filt and RE_SEARCH(filt).search(dict_concat(content), re.I)):
             mods[mid] = MODS[mid]
+    setlast(filt, mods)
     return mods
 
-def ppaths(filt=None, sortbyname=False):
+def ppaths(filt='', sortbyname=False):
     clear()
     global MODS
-    for mid, content in paths(filt, sortbyname).items():
-        for key in content.keys():
-            print(f"{mid:>{_MIDLEN-1}}:{ckey(key):{_NAMLEN+16}}{newline_join([f"{cver(k, i)}{v}" for i, (k, v) in enumerate(versort(content[key]))])}")
+    mods = paths(filt, sortbyname)
+    setlast(filt, mods)
+    for mid, content in mods.items():
+        for key in [e for e in content.keys() if e != HSH]:
+            print(f"{mid:>{_MIDLEN-1}}:{ckey(key):{_NAMLEN+16}}{newline_join([f"{cver(f"{k}", i)}{v}" for i, (k, v) in enumerate(versort(content[key]))])}")
     print(f"{len(MODS)} mods found")
 
-upaths = lambda: ppaths('__unsorted')
+upaths = lambda filt='', sortbyname=False: ppaths(UNSORT+' '+filt, sortbyname)
 
 def getmods(input_value):
     global MODS
@@ -243,6 +294,7 @@ def clean(input_value, force=False):
     if not os.path.exists('___CLEAN/'): os.mkdir('___CLEAN/')
     for m in mods:
         for name, package in m.items():
+            if name == HSH: continue
             for i, verpath in enumerate(versort(package)):
                 if i>0 or force: shutil.move(verpath[1], f"___CLEAN/{os.path.basename(verpath[1])}")
 
@@ -253,6 +305,7 @@ def move(input_value, fuzzypath):
     if path:
         for m in mods:
             for name, package in m.items():
+                if name == HSH: continue
                 for i, verpath in enumerate(versort(package)):
                     shutil.move(verpath[1], f"{path}/{os.path.basename(verpath[1])}")
     else:
